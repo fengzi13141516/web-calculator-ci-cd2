@@ -12,7 +12,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -28,7 +28,6 @@ jobs:
       run: |
         cd src
         pip install flake8
-        # 检查基本语法错误
         python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
     
     - name: Run unit tests
@@ -37,7 +36,7 @@ jobs:
         python -m pytest tests/unit/ -v --junitxml=test-results.xml
     
     - name: Upload unit test results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4  # 已更新为 v4
       if: always()
       with:
         name: unit-test-results
@@ -58,7 +57,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3
     
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -72,14 +71,12 @@ jobs:
     
     - name: Create functional test script
       run: |
-        # 创建功能测试Python脚本
         cat > functional_test.py << 'EOF'
         import requests
         import time
         import sys
         
         def wait_for_app(timeout=30):
-            """等待应用启动"""
             print("等待应用启动...")
             start_time = time.time()
             
@@ -98,7 +95,6 @@ jobs:
             return False
         
         def run_tests():
-            """运行功能测试"""
             test_cases = [
                 ("/health", "健康检查"),
                 ("/add/10&5", "加法"),
@@ -121,7 +117,6 @@ jobs:
                         print(f"  响应: {response.text[:100]}...")
                         passed += 1
                     elif response.status_code == 400 and "divide/10&0" in endpoint:
-                        # 除以零是预期错误
                         print(f"  状态码: {response.status_code} (预期错误)")
                         print(f"  响应: {response.text[:100]}...")
                         passed += 1
@@ -137,11 +132,9 @@ jobs:
             return failed == 0
         
         def main():
-            # 等待应用启动
             if not wait_for_app():
                 sys.exit(1)
             
-            # 运行测试
             if not run_tests():
                 sys.exit(1)
             
@@ -158,22 +151,17 @@ jobs:
       run: |
         echo "启动应用程序..."
         cd src
-        # 在后台启动应用
         python app.py > app.log 2>&1 &
         echo $! > app.pid
         echo "应用程序PID: $(cat app.pid)"
         
-        # 等待应用启动
         sleep 10
         
-        # 检查应用是否在运行
         if ps -p $(cat app.pid) > /dev/null; then
           echo "应用程序正在运行"
-          echo "应用日志前20行:"
           head -20 app.log || echo "无日志"
         else
           echo "应用程序启动失败"
-          echo "完整日志:"
           cat app.log
           exit 1
         fi
@@ -193,7 +181,6 @@ jobs:
           kill $pid 2>/dev/null || true
           sleep 2
         fi
-        # 清理
         rm -f src/app.pid src/app.log
 
   build-and-push:
