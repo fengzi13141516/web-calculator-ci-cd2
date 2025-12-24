@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Web计算器CI/CD项目
 
 这是一个用于学习CI/CD和蓝绿部署的Web计算器项目。
@@ -19,3 +20,7 @@
 ```bash
 git clone https://github.com/你的用户名/web-calculator-ci-cd.git
 cd web-calculator-ci-cd
+=======
+# web-calculator-ci-cd2
+Web计算器CI/CD项目
+>>>>>>> 7ee8eb03cdadac99b804970b480127cdaafe3562
