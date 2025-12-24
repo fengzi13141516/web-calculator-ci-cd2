@@ -1,0 +1,80 @@
+name: CD Pipeline
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    branches:
+      - main  # 推送到main分支时自动触发
+
+jobs:
+  deploy-to-vm:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v3
+    
+    - name: 生成部署包
+      run: |
+        # 创建部署目录
+        mkdir -p deploy-package
+        
+        # 复制部署文件
+        cp -r deployment/* deploy-package/
+        
+        # 创建环境文件
+        echo "GITHUB_REPOSITORY=${{ github.repository }}" > deploy-package/.env
+        echo "IMAGE_TAG=${{ github.sha }}" >> deploy-package/.env
+        
+        # 创建简易部署脚本
+        cat > deploy-package/deploy-simple.sh << 'EOF'
+        #!/bin/bash
+        
+        echo "开始简易部署..."
+        
+        # 停止并删除旧容器
+        docker-compose -f docker-compose.prod.yml down || true
+        
+        # 设置环境变量
+        export BLUE_IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+        export GREEN_IMAGE=ghcr.io/${{ github.repository }}:${{ github.sha }}
+        
+        # 启动所有服务
+        docker-compose -f docker-compose.prod.yml up -d
+        
+        echo "部署完成! 等待服务启动..."
+        
+        # 等待服务启动
+        sleep 20
+        
+        # 测试服务
+        echo "测试服务..."
+        curl -f http://localhost/health && echo "服务健康!" || echo "服务可能有问题"
+        EOF
+        
+        chmod +x deploy-package/deploy-simple.sh
+        
+        # 创建压缩包
+        tar -czf deploy-package.tar.gz deploy-package/
+        
+        echo "部署包已创建: deploy-package.tar.gz"
+    
+    - name: 上传部署包
+      uses: actions/upload-artifact@v3
+      with:
+        name: deploy-package
+        path: deploy-package.tar.gz
+    
+    - name: 显示部署说明
+      run: |
+        echo "========================================"
+        echo "部署说明:"
+        echo "========================================"
+        echo "1. 下载部署包: deploy-package.tar.gz"
+        echo "2. 在虚拟机上执行以下命令:"
+        echo "   tar -xzf deploy-package.tar.gz"
+        echo "   cd deploy-package"
+        echo "   docker login ghcr.io -u YOUR_USERNAME -p YOUR_TOKEN"
+        echo "   ./deploy-simple.sh"
+        echo "3. 访问应用: http://虚拟机IP"
+        echo "========================================"

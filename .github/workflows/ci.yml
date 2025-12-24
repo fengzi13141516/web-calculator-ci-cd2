@@ -1,0 +1,238 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        cd src
+        pip install -r requirements.txt pytest
+    
+    - name: Lint with flake8
+      run: |
+        cd src
+        pip install flake8
+        # 检查基本语法错误
+        python -m flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+    
+    - name: Run unit tests
+      run: |
+        cd src
+        python -m pytest tests/unit/ -v --junitxml=test-results.xml
+    
+    - name: Upload unit test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unit-test-results
+        path: src/test-results.xml
+    
+    - name: Display unit test summary
+      run: |
+        echo "=== 单元测试结果 ==="
+        if [ -f "src/test-results.xml" ]; then
+          echo "测试报告已生成"
+        else
+          echo "测试报告未找到"
+        fi
+
+  functional-test:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        cd src
+        pip install -r requirements.txt
+    
+    - name: Create functional test script
+      run: |
+        # 创建功能测试Python脚本
+        cat > functional_test.py << 'EOF'
+        import requests
+        import time
+        import sys
+        
+        def wait_for_app(timeout=30):
+            """等待应用启动"""
+            print("等待应用启动...")
+            start_time = time.time()
+            
+            for i in range(timeout // 2):
+                try:
+                    response = requests.get("http://localhost:5000/health", timeout=2)
+                    if response.status_code == 200:
+                        print(f"应用已启动！等待时间: {time.time() - start_time:.1f}秒")
+                        return True
+                except requests.exceptions.RequestException:
+                    time.sleep(2)
+                    if (i + 1) % 5 == 0:
+                        print(f"等待中... {i*2}秒")
+            
+            print(f"等待超时（{timeout}秒），应用未启动")
+            return False
+        
+        def run_tests():
+            """运行功能测试"""
+            test_cases = [
+                ("/health", "健康检查"),
+                ("/add/10&5", "加法"),
+                ("/subtract/10&5", "减法"),
+                ("/multiply/10&5", "乘法"),
+                ("/divide/10&5", "除法"),
+            ]
+            
+            passed = 0
+            failed = 0
+            
+            for endpoint, description in test_cases:
+                print(f"\n测试: {description} ({endpoint})")
+                
+                try:
+                    response = requests.get(f"http://localhost:5000{endpoint}", timeout=5)
+                    
+                    if response.status_code == 200:
+                        print(f"  状态码: {response.status_code}")
+                        print(f"  响应: {response.text[:100]}...")
+                        passed += 1
+                    elif response.status_code == 400 and "divide/10&0" in endpoint:
+                        # 除以零是预期错误
+                        print(f"  状态码: {response.status_code} (预期错误)")
+                        print(f"  响应: {response.text[:100]}...")
+                        passed += 1
+                    else:
+                        print(f"  状态码: {response.status_code} (预期200)")
+                        failed += 1
+                        
+                except Exception as e:
+                    print(f"  异常: {e}")
+                    failed += 1
+            
+            print(f"\n测试结果: 通过={passed}, 失败={failed}")
+            return failed == 0
+        
+        def main():
+            # 等待应用启动
+            if not wait_for_app():
+                sys.exit(1)
+            
+            # 运行测试
+            if not run_tests():
+                sys.exit(1)
+            
+            print("\n所有功能测试通过！")
+            sys.exit(0)
+        
+        if __name__ == "__main__":
+            main()
+        EOF
+        
+        chmod +x functional_test.py
+    
+    - name: Start application
+      run: |
+        echo "启动应用程序..."
+        cd src
+        # 在后台启动应用
+        python app.py > app.log 2>&1 &
+        echo $! > app.pid
+        echo "应用程序PID: $(cat app.pid)"
+        
+        # 等待应用启动
+        sleep 10
+        
+        # 检查应用是否在运行
+        if ps -p $(cat app.pid) > /dev/null; then
+          echo "应用程序正在运行"
+          echo "应用日志前20行:"
+          head -20 app.log || echo "无日志"
+        else
+          echo "应用程序启动失败"
+          echo "完整日志:"
+          cat app.log
+          exit 1
+        fi
+    
+    - name: Run functional tests
+      run: |
+        echo "运行功能测试..."
+        python functional_test.py
+    
+    - name: Stop application
+      if: always()
+      run: |
+        echo "停止应用程序..."
+        if [ -f "src/app.pid" ]; then
+          pid=$(cat src/app.pid)
+          echo "停止进程: $pid"
+          kill $pid 2>/dev/null || true
+          sleep 2
+        fi
+        # 清理
+        rm -f src/app.pid src/app.log
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: functional-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=sha,prefix=,suffix=,format=short
+          type=ref,event=branch
+          latest
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+    
+    - name: Display build info
+      run: |
+        echo "✅ Docker镜像构建完成"
+        echo "仓库: ghcr.io/${{ github.repository }}"
+        echo "标签:"
+        echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | sed 's/^/  - /'

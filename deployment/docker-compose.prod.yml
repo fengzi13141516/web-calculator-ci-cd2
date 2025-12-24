@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  proxy:
+    image: nginx:alpine
+    container_name: webcalc_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - webcalc-network
+    depends_on:
+      - app_blue
+      - app_green
+
+  app_blue:
+    image: ${BLUE_IMAGE:-web-calculator:latest}
+    container_name: webcalc_blue
+    restart: unless-stopped
+    expose:
+      - "5001"
+    environment:
+      - FLASK_ENV=production
+      - PORT=5001
+    networks:
+      - webcalc-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5001/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  app_green:
+    image: ${GREEN_IMAGE:-web-calculator:latest}
+    container_name: webcalc_green
+    restart: unless-stopped
+    expose:
+      - "5002"
+    environment:
+      - FLASK_ENV=production
+      - PORT=5002
+    networks:
+      - webcalc-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5002/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  webcalc-network:
+    driver: bridge
